@@ -68,6 +68,8 @@ Binance supports [time_in_force](configuration.md#understand-order_time_in_force
 For Binance, it is suggested to add `"BNB/<STAKE>"` to your blacklist to avoid issues, unless you are willing to maintain enough extra `BNB` on the account or unless you're willing to disable using `BNB` for fees.
 Binance accounts may use `BNB` for fees, and if a trade happens to be on `BNB`, further trades may consume this position and make the initial BNB trade unsellable as the expected amount is not there anymore.
 
+If not enough `BNB` is available to cover transaction fees, then fees will not be covered by `BNB` and no fee reduction will occur. Freqtrade will never buy BNB to cover for fees. BNB needs to be bought and monitored manually to this end.
+
 ### Binance sites
 
 Binance has been split into 2, and users must use the correct ccxt exchange ID for their exchange, otherwise API keys are not recognized.
@@ -124,6 +126,13 @@ These settings will be checked on startup, and freqtrade will show an error if t
 ![Binance futures settings](assets/binance_futures_settings.png)
 
 Freqtrade will not attempt to change these settings.
+
+## Bingx
+
+BingX supports [time_in_force](configuration.md#understand-order_time_in_force) with settings "GTC" (good till cancelled), "IOC" (immediate-or-cancel) and "PO" (Post only) settings.
+
+!!! Tip "Stoploss on Exchange"
+    Bingx supports `stoploss_on_exchange` and can use both stop-limit and stop-market orders. It provides great advantages, so we recommend to benefit from it by enabling stoploss on exchange.
 
 ## Kraken
 
@@ -297,7 +306,7 @@ $ pip3 install web3
 Most exchanges return current incomplete candle via their OHLCV/klines API interface.
 By default, Freqtrade assumes that incomplete candle is fetched from the exchange and removes the last candle assuming it's the incomplete candle.
 
-Whether your exchange returns incomplete candles or not can be checked using [the helper script](developer.md#Incomplete-candles) from the Contributor documentation.
+Whether your exchange returns incomplete candles or not can be checked using [the helper script](developer.md#incomplete-candles) from the Contributor documentation.
 
 Due to the danger of repainting, Freqtrade does not allow you to use this incomplete candle.
 

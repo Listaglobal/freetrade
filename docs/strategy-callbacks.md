@@ -19,6 +19,7 @@ Currently available callbacks:
 * [`adjust_trade_position()`](#adjust-trade-position)
 * [`adjust_entry_price()`](#adjust-entry-price)
 * [`leverage()`](#leverage-callback)
+* [`order_filled()`](#order-filled-callback)
 
 !!! Tip "Callback calling sequence"
     You can find the callback calling sequence in [bot-basics](bot-basics.md#bot-execution-logic)
@@ -164,9 +165,11 @@ E.g. If the `current_rate` is 200 USD, then returning `0.02` will set the stoplo
 During backtesting, `current_rate` (and `current_profit`) are provided against the candle's high (or low for short trades) - while the resulting stoploss is evaluated against the candle's low (or high for short trades).
 
 The absolute value of the return value is used (the sign is ignored), so returning `0.05` or `-0.05` have the same result, a stoploss 5% below the current price.
-Returning None will be interpreted as "no desire to change", and is the only safe way to return when you'd like to not modify the stoploss.
+Returning `None` will be interpreted as "no desire to change", and is the only safe way to return when you'd like to not modify the stoploss.
+`NaN` and `inf` values are considered invalid and will be ignored (identical to `None`).
 
-Stoploss on exchange works similar to `trailing_stop`, and the stoploss on exchange is updated as configured in `stoploss_on_exchange_interval` ([More details about stoploss on exchange](stoploss.md#stop-loss-on-exchange-freqtrade)).
+
+Stoploss on exchange works similar to `trailing_stop`, and the stoploss on exchange is updated as configured in `stoploss_on_exchange_interval` ([More details about stoploss on exchange](stoploss.md#stop-loss-on-exchangefreqtrade)).
 
 !!! Note "Use of dates"
     All time-based calculations should be done based on `current_time` - using `datetime.now()` or `datetime.utcnow()` is discouraged, as this will break backtesting support.
@@ -331,7 +334,7 @@ class AwesomeStrategy(IStrategy):
                         **kwargs) -> Optional[float]:
 
         if current_profit < 0.04:
-            return -1 # return a value bigger than the initial stoploss to keep using the initial stoploss
+            return None # return None to keep using the initial stoploss
 
         # After reaching the desired offset, allow the stoploss to trail by half the profit
         desired_stoploss = current_profit / 2
@@ -449,7 +452,7 @@ Stoploss values returned from `custom_stoploss()` must specify a percentage rela
 
     ```
 
-    Full examples can be found in the [Custom stoploss](strategy-advanced.md#custom-stoploss) section of the Documentation.
+    Full examples can be found in the [Custom stoploss](strategy-callbacks.md#custom-stoploss) section of the Documentation.
 
 !!! Note
     Providing invalid input to `stoploss_from_open()` may produce "CustomStoploss function did not return valid stoploss" warnings.
@@ -466,7 +469,7 @@ The helper function `stoploss_from_absolute()` can be used to convert from an ab
 
 ??? Example "Returning a stoploss using absolute price from the custom stoploss function"
 
-    If we want to trail a stop price at 2xATR below current price we can call `stoploss_from_absolute(current_rate + (side * candle['atr'] * 2), current_rate, is_short=trade.is_short, leverage=trade.leverage)`.
+    If we want to trail a stop price at 2xATR below current price we can call `stoploss_from_absolute(current_rate + (side * candle['atr'] * 2), current_rate=current_rate, is_short=trade.is_short, leverage=trade.leverage)`.
     For futures, we need to adjust the direction (up or down), as well as adjust for leverage, since the [`custom_stoploss`](strategy-callbacks.md#custom-stoploss) callback  returns the ["risk for this trade"](stoploss.md#stoploss-and-leverage) - not the relative price movement.
 
     ``` python
@@ -491,7 +494,8 @@ The helper function `stoploss_from_absolute()` can be used to convert from an ab
             candle = dataframe.iloc[-1].squeeze()
             side = 1 if trade.is_short else -1
             return stoploss_from_absolute(current_rate + (side * candle['atr'] * 2), 
-                                          current_rate, is_short=trade.is_short,
+                                          current_rate=current_rate, 
+                                          is_short=trade.is_short,
                                           leverage=trade.leverage)
 
     ```
@@ -783,7 +787,7 @@ Additional entries are ignored once you have reached the maximum amount of extra
 ### Decrease position
 
 The strategy is expected to return a negative stake_amount (in stake currency) for a partial exit.
-Returning the full owned stake at that point (based on the current price) (`-(trade.amount / trade.leverage) * current_exit_rate`) results in a full exit.  
+Returning the full owned stake at that point (`-trade.stake_amount`) results in a full exit.  
 Returning a value more than the above (so remaining stake_amount would become negative) will result in the bot ignoring the signal.
 
 !!! Note "About stake size"
@@ -808,6 +812,7 @@ Returning a value more than the above (so remaining stake_amount would become ne
 
 ``` python
 from freqtrade.persistence import Trade
+from typing import Optional, Tuple, Union
 
 
 class DigDeeperStrategy(IStrategy):
@@ -947,7 +952,7 @@ If the cancellation of the original order fails, then the order will not be repl
 
 ```python
 from freqtrade.persistence import Trade
-from datetime import timedelta
+from datetime import timedelta, datetime
 
 class AwesomeStrategy(IStrategy):
 
@@ -1022,3 +1027,33 @@ class AwesomeStrategy(IStrategy):
 
 All profit calculations include leverage. Stoploss / ROI also include leverage in their calculation.
 Defining a stoploss of 10% at 10x leverage would trigger the stoploss with a 1% move to the downside.
+
+## Order filled Callback
+
+The `order_filled()` callback may be used to perform specific actions based on the current trade state after an order is filled.
+It will be called independent of the order type (entry, exit, stoploss or position adjustment).
+
+Assuming that your strategy needs to store the high value of the candle at trade entry, this is possible with this callback as the following example show.
+
+``` python
+class AwesomeStrategy(IStrategy):
+    def order_filled(self, pair: str, trade: Trade, order: Order, current_time: datetime, **kwargs) -> None:
+        """
+        Called right after an order fills. 
+        Will be called for all order types (entry, exit, stoploss, position adjustment).
+        :param pair: Pair for trade
+        :param trade: trade object.
+        :param order: Order object.
+        :param current_time: datetime object, containing the current datetime
+        :param **kwargs: Ensure to keep this here so updates to this won't break your strategy.
+        """
+        # Obtain pair dataframe (just to show how to access it)
+        dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
+        last_candle = dataframe.iloc[-1].squeeze()
+        
+        if (trade.nr_of_successful_entries == 1) and (order.ft_order_side == trade.entry_side):
+            trade.set_custom_data(key='entry_candle_high', value=last_candle['high'])
+
+        return None
+
+```
